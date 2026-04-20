@@ -2,105 +2,86 @@ pipeline {
     agent any
 
     environment {
-        // Ścieżka relatywna do Twojego folderu w workspace
-        // Jeśli mdo-projekt zawiera folder url_shortener_files, zostawiamy jak poniżej:
-        FILES_DIR = "."
-        
-        // Nazwy obrazów
+        // Obrazy Docker
         BUILD_IMAGE = "url-shortener-builder"
         DEPLOY_IMAGE = "url-shortener-deploy"
+        // Zmienna FILES_DIR teraz wskazuje na bieżący folder
+        FILES_DIR = "."
     }
 
     stages {
-        stage('Initialize Workspace') {
+        stage('Checkout') {
             steps {
-                // Ta sekcja obsłuży Twoje lokalne kopiowanie przez 'docker cp'
-                // Sprawdzamy czy pliki dotarły do kontenera
-                sh "ls -la"
-                sh "ls -la ${FILES_DIR}"
-                
-                // Nadanie uprawnień do skryptu smoke testu
-                sh "chmod +x ${FILES_DIR}/smoke_test.sh"
+                // Pobieramy kod z Twojego nowego repozytorium
+                git url: 'https://github.com/SzymonJednorozec/devops_urls_test.git'
             }
         }
 
-        stage('Build Builder Image') {
+        stage('Build Builder') {
             steps {
-                dir("${FILES_DIR}") {
-                    sh "docker build -t ${BUILD_IMAGE} -f Dockerfile.build ."
-                }
+                // Budujemy obraz bazowy (Dockerfile.build powinien być w głównym folderze)
+                sh "docker build -t ${BUILD_IMAGE} -f Dockerfile.build ."
             }
         }
 
         stage('Run Unit Tests') {
             steps {
-                dir("${FILES_DIR}") {
-                    // Uruchamiamy testy i czekamy na exit code
-                    sh "docker-compose -f docker-compose.test.yml up --exit-code-from app-test"
-                }
+                // Uruchamiamy testy z docker-compose
+                sh "docker-compose -f docker-compose.test.yml up --exit-code-from app-test"
             }
             post {
                 always {
-                    dir("${FILES_DIR}") {
-                        sh "docker-compose -f docker-compose.test.yml down -v"
-                    }
+                    sh "docker-compose -f docker-compose.test.yml down -v"
                 }
             }
         }
 
         stage('Build Runtime Image') {
             steps {
-                dir("${FILES_DIR}") {
-                    // Budowa lekkiego obrazu produkcyjnego
-                    sh "docker build -t ${DEPLOY_IMAGE} -f Dockerfile.runtime ."
-                }
+                // Budujemy lekki obraz produkcyjny
+                sh "docker build -t ${DEPLOY_IMAGE} -f Dockerfile.runtime ."
             }
         }
 
         stage('Deploy & Smoke Test') {
             steps {
-                dir("${FILES_DIR}") {
-                    sh "docker-compose -f docker-compose.deploy.yml up -d"
-                    
-                    echo "Waiting for app to be ready..."
-                    sh "sleep 15"
-                    
-                    // Odpalenie Twojego skryptu bashowego z listą URL
-                    sh "./smoke_test.sh list.url"
-                }
+                // 1. Odpalenie aplikacji i bazy
+                sh "docker-compose -f docker-compose.deploy.yml up -d"
+                
+                // 2. Czekamy na start
+                echo "Oczekiwanie na uruchomienie aplikacji..."
+                sh "sleep 15"
+                
+                // 3. Odpalenie Twojego skryptu (smoke_test.sh w głównym folderze)
+                sh "chmod +x smoke_test.sh"
+                sh "./smoke_test.sh list.url"
             }
             post {
                 always {
-                    dir("${FILES_DIR}") {
-                        sh "docker-compose -f docker-compose.deploy.yml down -v"
-                    }
+                    echo "Sprzątanie: niszczenie kontenerów deploy i bazy..."
+                    sh "docker-compose -f docker-compose.deploy.yml down -v"
                 }
             }
         }
 
         stage('Publish Artifact') {
             steps {
-                dir("${FILES_DIR}") {
-                    script {
-                        // Tworzenie paczki .tgz (standard NPM)
-                        sh """
-                            docker run --rm -v \$(pwd):/out ${BUILD_IMAGE} cp -r /app/package.json /app/dist /out/
-                            docker run --rm -v \$(pwd):/out -w /out node:20-alpine npm pack
-                        """
-                        // Archiwizacja pliku w Jenkinsie
-                        archiveArtifacts artifacts: '*.tgz', fingerprint: true
-                    }
-                }
+                // 1. Odpalenie Twojego skryptu publikacji (publish.sh w głównym folderze)
+                sh "chmod +x publish.sh"
+                sh "./publish.sh ${BUILD_IMAGE}"
+                
+                // 2. Archiwizacja paczki w Jenkinsie
+                archiveArtifacts artifacts: '*.tgz', fingerprint: true
             }
         }
     }
 
     post {
         success {
-            echo "Pipeline zakończony sukcesem! Artefakt .tgz jest gotowy."
+            echo "Pipeline zakończony sukcesem! Artefakt .tgz jest dostępny w Jenkinsie."
         }
         failure {
-            echo "Błąd w Pipeline. Sprawdź logi Smoke Testu."
+            echo "Pipeline nie powiódł się. Sprawdź logi poszczególnych etapów."
         }
     }
 }
