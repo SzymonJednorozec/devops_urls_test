@@ -62,8 +62,10 @@ pipeline {
         stage('Publish Artifact') {
             steps {
                 dir("${FILES_DIR}") {
-                    sh "chmod +x publish.sh"
-                    sh "./publish.sh ${BUILD_IMAGE}"
+                    withCredentials([string(credentialsId: 'NPM_TOKEN', variable: 'NPM_TOKEN')]) {
+                        sh "chmod +x publish.sh"
+                        sh "./publish.sh ${BUILD_IMAGE}"
+                    }
                     archiveArtifacts artifacts: '*.tgz', fingerprint: true
                 }
             }
