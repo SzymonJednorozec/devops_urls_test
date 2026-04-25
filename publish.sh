@@ -11,5 +11,4 @@ docker run --rm -v $(pwd):/out -w /out node:20-alpine sh -c "
   npm publish --access public
 "
 
-echo "Package published successfully to NPM.js"
 echo "------------------------------------------"
